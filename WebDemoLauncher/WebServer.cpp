@@ -6,10 +6,29 @@
 #include <direct.h>
 #include <stdlib.h>
 #include <iostream>
+#include <time.h>
 
 #pragma comment(lib, "Ws2_32.lib")
 
 #define PORT "8888"
+
+int random_number(int min_num, int max_num)
+{
+	int result = 0, low_num = 0, hi_num = 0;
+	if (min_num<max_num)
+	{
+		low_num = min_num;
+		hi_num = max_num + 1; // this is done to include max_num in output.
+	}
+	else {
+		low_num = max_num + 1;// this is done to include max_num in output.
+		hi_num = min_num;
+	}
+
+	srand(time(NULL));
+	result = (rand() % (hi_num - low_num)) + low_num;
+	return result;
+}
 
 WebServer::WebServer()
 {
@@ -18,8 +37,16 @@ WebServer::WebServer()
 		throw new NetworkException("Error initializing winsock");
 	}
 
-	if (bindPort() != ERROR_SUCCESS) {
-		throw new NetworkException("Error binding port");
+	int numRetries = 10;
+	int bindResult;
+	do { 
+		port = random_number(50000, 60000);
+		bindResult = bindPort(port);
+	} while (bindResult != ERROR_SUCCESS && numRetries++ > 0);
+
+	if (bindResult != ERROR_SUCCESS) {
+		WSACleanup();
+		throw new NetworkException("Binding failed");
 	}
 }
 
@@ -36,7 +63,7 @@ int WebServer::initWinsock(void) {
 	return 0;
 }
 
-int WebServer::bindPort(void) {
+int WebServer::bindPort(int port) {
 	int iResult;
 
 	struct addrinfo *result = NULL, *ptr = NULL, hints;
@@ -47,8 +74,13 @@ int WebServer::bindPort(void) {
 	hints.ai_protocol = IPPROTO_TCP;
 	hints.ai_flags = AI_PASSIVE;
 
+	char portString[16];
+	sprintf(portString, "%i", port);
+
+	std::cout << "Trying to bind to port " << portString << "...";
+
 	// Resolve the local address and port to be used by the server
-	iResult = getaddrinfo(NULL, PORT, &hints, &result);
+	iResult = getaddrinfo(NULL, portString, &hints, &result);
 	if (iResult != 0) {
 		printf("getaddrinfo failed: %d\n", iResult);
 		WSACleanup();
@@ -69,7 +101,6 @@ int WebServer::bindPort(void) {
 		printf("bind failed with error: %d\n", WSAGetLastError());
 		freeaddrinfo(result);
 		closesocket(ListenSocket);
-		WSACleanup();
 		return 1;
 	}
 
@@ -79,6 +110,8 @@ int WebServer::bindPort(void) {
 		WSACleanup();
 		return 1;
 	}
+
+	std::cout << "done" << std::endl;
 
 	return 0;
 }
@@ -319,6 +352,10 @@ long WebServer::getFileSize(std::string filename)
 	return rc == 0 ? stat_buf.st_size : -1;
 }
 
+int WebServer::getPort()
+{
+	return port;
+}
 
 void WebServer::transferFile(Connection& conn, std::string fileName)
 {

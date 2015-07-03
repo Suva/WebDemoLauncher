@@ -24,13 +24,14 @@ typedef std::vector<Connection> ConnectionList;
 class WebServer
 {
 private:
+	int port;
 	WSADATA wsaData;
 	SOCKET ListenSocket;
 
 	ConnectionList connections;
 
 	int initWinsock(void);
-	int bindPort(void);
+	int bindPort(int);
 	bool ReadData(Connection & conn);
 	bool isEndOfRequest(std::string request);
 	void handleRequest(Connection&, std::string);
@@ -41,6 +42,7 @@ private:
 
 public:
 	WebServer();
+	int getPort();
 	int handle();
 
 	~WebServer();

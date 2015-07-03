@@ -7,8 +7,6 @@
 #include <stdlib.h>
 #include <iostream>
 
-
-
 #pragma comment(lib, "Ws2_32.lib")
 
 #define PORT "8888"

@@ -5,6 +5,7 @@
 #include <streambuf>
 #include <direct.h>
 #include <stdlib.h>
+#include <iostream>
 
 
 #pragma comment(lib, "Ws2_32.lib")
@@ -104,7 +105,6 @@ int WebServer::handle() {
 	int recvbuflen = DEFAULT_BUFLEN - 1;
 
 	
-
 	do {
 		memset(recvbuf, 0, DEFAULT_BUFLEN);
 		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
@@ -141,61 +141,58 @@ bool WebServer::isEndOfRequest(std::string request) {
 }
 
 
-
 void WebServer::handleRequest(SOCKET ClientSocket, std::string requestString) {
 	Request request = Request(requestString);
 
-	BinaryData data = getFileContents(request.fileName);
+	int fileSize = getFileSize(request.fileName);
 
 	printf("Requested file: %s\n", request.fileName.c_str());
 	
 	std::string response = "";
 
-	if (data.length == 0) {
+	if (fileSize < 0) {
 		response += "HTTP/1.1 404 Not found\r\nContent-Length: 0\r\n\r\n";
 	} else {
 		response += "HTTP/1.1 200 OK\r\nContent-Type:";
 		response += request.fileType;
 		response += "\r\nContent-Length: ";
-		response += std::to_string(data.length);
+		response += std::to_string(fileSize);
 		response += "\r\n\r\n";
 	}
 
 	int iSendResult = send(ClientSocket, response.c_str(), response.length(), 0);
 
-	if (data.length > 0) {
-		iSendResult = send(ClientSocket, data.data, data.length, 0);
-	}
-	
-	if (iSendResult == SOCKET_ERROR) {
-		printf("send failed: %d\n", WSAGetLastError());
-		closesocket(ClientSocket);
-		WSACleanup();
-		throw new NetworkException("Error sending response to client!");
+	if (fileSize >= 0) {
+		transferFile(ClientSocket, request.fileName);
 	}
 }
 
-BinaryData WebServer::getFileContents(std::string fileName) {
-	BinaryData res;
-	res.length = 0;
+long WebServer::getFileSize(std::string filename)
+{
+	struct stat stat_buf;
+	int rc = stat(filename.c_str(), &stat_buf);
+	return rc == 0 ? stat_buf.st_size : -1;
+}
 
-	FILE* f = fopen(fileName.c_str(), "r");
-	if (f) {
-		fseek(f, 0, SEEK_END);
-		size_t size = ftell(f);
 
-		char* where = new char[size];
+void WebServer::transferFile(SOCKET clientSocket, std::string fileName)
+{
+	FILE* f = fopen(fileName.c_str(), "rb");
 
-		rewind(f);
-		fread(where, sizeof(char), size, f);
+	std::cout << "Transferring file " << fileName << "...";
 
-		fclose(f);
+	char buf[512];
+	int totalCharactersRead = 0;
 
-		res.data = where;
-		res.length = size;
+	while (!feof(f)) {
+		int charactersRead = fread(buf, sizeof(char), 512, f);
+		send(clientSocket, buf, charactersRead, 0);
+		totalCharactersRead += charactersRead;
 	}
-	
-	return res;
+
+	fclose(f);
+
+	std::cout << " done [" << std::to_string(totalCharactersRead) << "]\n";
 }
 
 WebServer::~WebServer()

@@ -14,15 +14,15 @@ class WebServer
 {
 private:
 	WSADATA wsaData;
+	SOCKET ListenSocket;
+
 	int initWinsock(void);
 	int bindPort(void);
 	bool isEndOfRequest(std::string request);
 	void handleRequest(SOCKET ClientSocket, std::string request);
-
-	BinaryData getFileContents(std::string fileName);
+	long getFileSize(std::string filename);
+	void transferFile(SOCKET ClientSocket, std::string fileName);	
 	
-	SOCKET ListenSocket;
-
 public:
 	WebServer();
 	int handle();

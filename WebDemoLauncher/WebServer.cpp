@@ -8,6 +8,7 @@
 #include <iostream>
 
 
+
 #pragma comment(lib, "Ws2_32.lib")
 
 #define PORT "8888"
@@ -84,49 +85,195 @@ int WebServer::bindPort(void) {
 	return 0;
 }
 
-int WebServer::handle() {
-	SOCKET ClientSocket;
+#define BUFFER_SIZE 1024
 
-	ClientSocket = INVALID_SOCKET;
+bool WebServer::ReadData(Connection& conn)
+{
+	char buf[BUFFER_SIZE];
+	memset(buf, 0, BUFFER_SIZE);
 
-	// Accept a client socket
-	ClientSocket = accept(ListenSocket, NULL, NULL);
-	if (ClientSocket == INVALID_SOCKET) {
-		printf("accept failed: %d\n", WSAGetLastError());
-		closesocket(ListenSocket);
-		WSACleanup();
-		return 1;
+	int nBytes = recv(conn.sd, buf, BUFFER_SIZE - 1, 0);
+	if (nBytes == 0) {
+		std::cout << "Socket " << conn.sd <<
+			" was closed by the client. Shutting down." << std::endl;
+		return false;
+	}
+	else if (nBytes == SOCKET_ERROR) {
+		// Something bad happened on the socket.  It could just be a
+		// "would block" notification, or it could be something more
+		// serious.  Let caller handle the latter case.  WSAEWOULDBLOCK
+		// can happen after select() says a socket is readable under
+		// Win9x: it doesn't happen on WinNT/2000 or on Unix.
+		int err;
+		int errlen = sizeof(err);
+		getsockopt(conn.sd, SOL_SOCKET, SO_ERROR, (char*)&err, &errlen);
+		return (err == WSAEWOULDBLOCK);
 	}
 
-	#define DEFAULT_BUFLEN 512
+	conn.readbuf.append(buf);
 
-	char recvbuf[DEFAULT_BUFLEN];
-	int iResult;
-	int recvbuflen = DEFAULT_BUFLEN - 1;
+	if (isEndOfRequest(conn.readbuf)) {
+		handleRequest(conn, conn.readbuf);
+		conn.readbuf = "";
+	}
 
+	return true;
+}
+
+bool WebServer::WriteData(Connection& conn)
+{
+	if (conn.writebuf.length() == 0) {
+		return true; // nothing to write
+	}
+
+	int nBytes = send(conn.sd, conn.writebuf.data(), conn.writebuf.length(), 0);
+	if (nBytes == SOCKET_ERROR) {
+		// Something bad happened on the socket.  Deal with it.
+		int err;
+		int errlen = sizeof(err);
+		getsockopt(conn.sd, SOL_SOCKET, SO_ERROR, (char*)&err, &errlen);
+		return (err == WSAEWOULDBLOCK);
+	}
+
+	if (nBytes == conn.writebuf.length()) {
+		// Everything got sent, so take a shortcut on clearing buffer.
+		conn.writebuf = "";
+	}
+	else {
+		// We sent part of the buffer's data.  Remove that data from
+		// the buffer.
+		conn.writebuf = conn.writebuf.substr(nBytes);
+	}
+
+	return true;
+}
+
+void WebServer::SetupFDSets(fd_set& ReadFDs, fd_set& WriteFDs, fd_set& ExceptFDs)
+{
+	FD_ZERO(&ReadFDs);
+	FD_ZERO(&WriteFDs);
+	FD_ZERO(&ExceptFDs);
+
+	// Add the listener socket to the read and except FD sets, if there
+	// is one.
+	if (ListenSocket != INVALID_SOCKET) {
+		FD_SET(ListenSocket, &ReadFDs);
+		FD_SET(ListenSocket, &ExceptFDs);
+	}
+
+	// Add client connections
+	ConnectionList::iterator it = connections.begin();
+	while (it != connections.end()) {
+		FD_SET(it->sd, &ReadFDs);
+
+		if (it->writebuf.length() > 0) {
+			// There's data still to be sent on this socket, so we need
+			// to be signalled when it becomes writable.
+			FD_SET(it->sd, &WriteFDs);
+		}
+
+		FD_SET(it->sd, &ExceptFDs);
+
+		++it;
+	}
+}
+
+int WebServer::handle() {
+	sockaddr_in sinRemote;
+	int nAddrSize = sizeof(sinRemote);
 	
-	do {
-		memset(recvbuf, 0, DEFAULT_BUFLEN);
-		iResult = recv(ClientSocket, recvbuf, recvbuflen, 0);
-		std::string request;
-		if (iResult > 0) {
-			request += recvbuf;
+	while(1){
+		fd_set ReadFDs, WriteFDs, ExceptFDs;
+		SetupFDSets(ReadFDs, WriteFDs, ExceptFDs);
 
-			if (isEndOfRequest(request)) {
-				handleRequest(ClientSocket, request);
+		if (select(0, &ReadFDs, &WriteFDs, &ExceptFDs, 0) > 0) {
+			if (FD_ISSET(ListenSocket, &ReadFDs)) {
+				SOCKET sd = accept(ListenSocket,
+					(sockaddr*)&sinRemote, &nAddrSize);
+				if (sd != INVALID_SOCKET) {
+					// Tell user we accepted the socket, and add it to
+					// our connecition list.
+					std::cout << "Accepted connection from " <<
+						inet_ntoa(sinRemote.sin_addr) << ":" <<
+						ntohs(sinRemote.sin_port) <<
+						", socket " << sd << "." << std::endl;
+					connections.push_back(Connection(sd));
+
+					if ((connections.size() + 1) > 64) {
+						// For the background on this check, see
+						// www.tangentsoft.net/wskfaq/advanced.html#64sockets
+						// The +1 is to account for the listener socket.
+						std::cout << "WARNING: More than 63 client "
+							"connections accepted.  This will not "
+							"work reliably on some Winsock "
+							"stacks!" << std::endl;
+					}
+
+					// Mark the socket as non-blocking, for safety.
+					u_long nNoBlock = 1;
+					ioctlsocket(sd, FIONBIO, &nNoBlock);
+				}
+				else {
+					std::cerr << "accept() failed" << std::endl;
+					return 1;
+				}
 			}
 
-		}
-		else if (iResult == 0){
-			printf("Connection closing...\n");
+			ConnectionList::iterator it = connections.begin();
+			while (it != connections.end()) {
+				bool bOK = true;
+				const char* pcErrorType = 0;
+
+				// See if this socket's flag is set in any of the FD
+				// sets.
+				if (FD_ISSET(it->sd, &ExceptFDs)) {
+					bOK = false;
+					pcErrorType = "General socket error";
+					FD_CLR(it->sd, &ExceptFDs);
+				}
+				else {
+					if (FD_ISSET(it->sd, &ReadFDs)) {
+						std::cout << "Socket " << it->sd <<
+							" became readable; handling it." <<
+							std::endl;
+						bOK = ReadData(*it);
+						pcErrorType = "Read error";
+						FD_CLR(it->sd, &ReadFDs);
+					}
+					if (FD_ISSET(it->sd, &WriteFDs)) {
+						std::cout << "Socket " << it->sd <<
+							" became writable; handling it." <<
+							std::endl;
+						bOK = WriteData(*it);
+						pcErrorType = "Write error";
+						FD_CLR(it->sd, &WriteFDs);
+					}
+				}
+
+				if (!bOK) {
+					// Something bad happened on the socket, or the
+					// client closed its half of the connection.  Shut
+					// the conn down and remove it from the list.
+					int err;
+					int errlen = sizeof(err);
+					getsockopt(it->sd, SOL_SOCKET, SO_ERROR,
+						(char*)&err, &errlen);
+					
+					closesocket(it->sd);
+					connections.erase(it);
+					it = connections.begin();
+				}
+				else {
+					// Go on to next connection
+					++it;
+				}
+			}			
+		
 		} else {
-			printf("recv failed: %d\n", WSAGetLastError());
-			closesocket(ClientSocket);
-			WSACleanup();
+			std::cerr << "select() failed" << std::endl;
 			return 1;
 		}
-
-	} while (iResult > 0);
+	}
 
 	return 0;
 }
@@ -141,7 +288,7 @@ bool WebServer::isEndOfRequest(std::string request) {
 }
 
 
-void WebServer::handleRequest(SOCKET ClientSocket, std::string requestString) {
+void WebServer::handleRequest(Connection& conn, std::string requestString) {
 	Request request = Request(requestString);
 
 	int fileSize = getFileSize(request.fileName);
@@ -160,10 +307,10 @@ void WebServer::handleRequest(SOCKET ClientSocket, std::string requestString) {
 		response += "\r\n\r\n";
 	}
 
-	int iSendResult = send(ClientSocket, response.c_str(), response.length(), 0);
+	conn.writebuf.append(response);
 
 	if (fileSize >= 0) {
-		transferFile(ClientSocket, request.fileName);
+		transferFile(conn, request.fileName);
 	}
 }
 
@@ -175,18 +322,18 @@ long WebServer::getFileSize(std::string filename)
 }
 
 
-void WebServer::transferFile(SOCKET clientSocket, std::string fileName)
+void WebServer::transferFile(Connection& conn, std::string fileName)
 {
 	FILE* f = fopen(fileName.c_str(), "rb");
 
 	std::cout << "Transferring file " << fileName << "...";
 
-	char buf[512];
+	char buf[BUFFER_SIZE];
 	int totalCharactersRead = 0;
 
 	while (!feof(f)) {
-		int charactersRead = fread(buf, sizeof(char), 512, f);
-		send(clientSocket, buf, charactersRead, 0);
+		int charactersRead = fread(buf, sizeof(char), BUFFER_SIZE, f);
+		conn.writebuf.append(buf, charactersRead);
 		totalCharactersRead += charactersRead;
 	}
 

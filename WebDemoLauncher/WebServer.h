@@ -37,8 +37,6 @@ private:
 	bool isEndOfRequest(std::string request);
 	void createResponse(Connection &conn, std::string status, std::string contentType, std::string payload);
 	void handleRequest(Connection&, Request);
-	long getFileSize(std::string filename);
-	void transferFile(Connection& conn, std::string fileName);
 	bool WriteData(Connection& conn);
 	void SetupFDSets(fd_set& ReadFDs, fd_set& WriteFDs, fd_set& ExceptFDs);
 	std::string getFile(std::string fileName);
@@ -54,9 +52,9 @@ public:
 
 class NetworkException : public std::exception {
 private: 
-	char *reason;
+	std::string reason;
 public:
-	NetworkException(char *message) {
+	NetworkException(std::string message) {
 		reason = message;
 	}
 };

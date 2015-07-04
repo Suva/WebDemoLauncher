@@ -16,4 +16,4 @@ Send get request to /shutdown, this will immediately terminate the program. With
 
 ### Monitor window with heartbeat
 
-You can send get requests to /heartbeat. After the first request to /heartbeat, the server starts a timer that will terminate program if no more heartbeats are sent in 3 seconds.
+You can send get requests to /heartbeat. After the first request to /heartbeat, the server starts a timer that will terminate program if no more heartbeats are sent in 3 seconds. This will effectively close the server after window is closed.

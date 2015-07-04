@@ -3,7 +3,6 @@
 
 #include "stdafx.h"
 #include "WebServer.h"
-#include <iostream>
 
 void launchBrowser(std::string url) {
 	std::string command;

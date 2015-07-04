@@ -1,16 +1,7 @@
 #include "stdafx.h"
 #include "WebServer.h"
-#include "Request.h"
-#include <fstream>
-#include <streambuf>
-#include <direct.h>
-#include <stdlib.h>
-#include <iostream>
-#include <time.h>
 
 #pragma comment(lib, "Ws2_32.lib")
-
-#define PORT "8888"
 
 int random_number(int min_num, int max_num)
 {
@@ -25,13 +16,14 @@ int random_number(int min_num, int max_num)
 		hi_num = min_num;
 	}
 
-	srand(time(NULL));
 	result = (rand() % (hi_num - low_num)) + low_num;
 	return result;
 }
 
 WebServer::WebServer()
 {
+	srand((unsigned int)time(NULL));
+
 	ListenSocket = INVALID_SOCKET;
 	if (initWinsock() != ERROR_SUCCESS) {
 		throw new NetworkException("Error initializing winsock");
@@ -144,8 +136,9 @@ bool WebServer::ReadData(Connection& conn)
 	conn.readbuf.append(buf);
 
 	if (isEndOfRequest(conn.readbuf)) {
-		handleRequest(conn, conn.readbuf);
-		conn.readbuf = "";
+		Request request = Request(conn.readbuf);
+		conn.readbuf.clear();
+		handleRequest(conn, request);	
 	}
 
 	return true;
@@ -168,7 +161,7 @@ bool WebServer::WriteData(Connection& conn)
 
 	if (nBytes == conn.writebuf.length()) {
 		// Everything got sent, so take a shortcut on clearing buffer.
-		conn.writebuf = "";
+		conn.writebuf.clear();
 	}
 	else {
 		// We sent part of the buffer's data.  Remove that data from
@@ -199,7 +192,7 @@ void WebServer::SetupFDSets(fd_set& ReadFDs, fd_set& WriteFDs, fd_set& ExceptFDs
 
 		if (it->writebuf.length() > 0) {
 			// There's data still to be sent on this socket, so we need
-			// to be signalled when it becomes writable.
+			// to be signaled when it becomes writable.
 			FD_SET(it->sd, &WriteFDs);
 		}
 
@@ -213,17 +206,21 @@ int WebServer::handle() {
 	sockaddr_in sinRemote;
 	int nAddrSize = sizeof(sinRemote);
 	
+	timeval time;
+	time.tv_sec = 3;
+	time.tv_usec = 0;
+
 	while(1){
 		fd_set ReadFDs, WriteFDs, ExceptFDs;
 		SetupFDSets(ReadFDs, WriteFDs, ExceptFDs);
 
-		if (select(0, &ReadFDs, &WriteFDs, &ExceptFDs, 0) > 0) {
+		if (select(0, &ReadFDs, &WriteFDs, &ExceptFDs, &time) > 0) {
 			if (FD_ISSET(ListenSocket, &ReadFDs)) {
 				SOCKET sd = accept(ListenSocket,
 					(sockaddr*)&sinRemote, &nAddrSize);
 				if (sd != INVALID_SOCKET) {
 					// Tell user we accepted the socket, and add it to
-					// our connecition list.
+					// our connection list.
 					std::cout << "Accepted connection from " <<
 						inet_ntoa(sinRemote.sin_addr) << ":" <<
 						ntohs(sinRemote.sin_port) <<
@@ -264,17 +261,11 @@ int WebServer::handle() {
 				}
 				else {
 					if (FD_ISSET(it->sd, &ReadFDs)) {
-						std::cout << "Socket " << it->sd <<
-							" became readable; handling it." <<
-							std::endl;
 						bOK = ReadData(*it);
 						pcErrorType = "Read error";
 						FD_CLR(it->sd, &ReadFDs);
 					}
 					if (FD_ISSET(it->sd, &WriteFDs)) {
-						std::cout << "Socket " << it->sd <<
-							" became writable; handling it." <<
-							std::endl;
 						bOK = WriteData(*it);
 						pcErrorType = "Write error";
 						FD_CLR(it->sd, &WriteFDs);
@@ -298,11 +289,16 @@ int WebServer::handle() {
 					// Go on to next connection
 					++it;
 				}
-			}			
+			}
+
+			if (shutdownTriggered)
+			{
+				std::cout << "Shutdown triggered by remote, closing program." << std::endl;
+				return 0;
+			}
 		
 		} else {
-			std::cerr << "select() failed" << std::endl;
-			return 1;
+			// Timeout handler
 		}
 	}
 
@@ -318,38 +314,31 @@ bool WebServer::isEndOfRequest(std::string request) {
 	return false;
 }
 
-
-void WebServer::handleRequest(Connection& conn, std::string requestString) {
-	Request request = Request(requestString);
-
-	int fileSize = getFileSize(request.fileName);
-
-	printf("Requested file: %s\n", request.fileName.c_str());
-	
-	std::string response = "";
-
-	if (fileSize < 0) {
-		response += "HTTP/1.1 404 Not found\r\nContent-Length: 0\r\n\r\n";
-	} else {
-		response += "HTTP/1.1 200 OK\r\nContent-Type:";
-		response += request.fileType;
-		response += "\r\nContent-Length: ";
-		response += std::to_string(fileSize);
-		response += "\r\n\r\n";
-	}
-
-	conn.writebuf.append(response);
-
-	if (fileSize >= 0) {
-		transferFile(conn, request.fileName);
-	}
+void WebServer::createResponse(Connection &conn, std::string status, std::string contentType, std::string payload)
+{
+	conn.writebuf +=
+		"HTTP/1.1" + status + "\r\n" +
+		"Content-Type: " + contentType + "\r\n" +
+		"Content-Length: " + std::to_string(payload.length()) + "\r\n\r\n" +
+		payload;
 }
 
-long WebServer::getFileSize(std::string filename)
+void WebServer::handleRequest(Connection& conn, Request request) 
 {
-	struct stat stat_buf;
-	int rc = stat(filename.c_str(), &stat_buf);
-	return rc == 0 ? stat_buf.st_size : -1;
+	// Special requests
+	if (request.fileName == "shutdown") {
+		shutdownTriggered = true;
+		createResponse(conn, "200 OK", "text/plain", "Shutdown initiated.");
+		return;
+	}
+
+	// Normal file handling
+	std::string fileContents = getFile(request.fileName);
+	if (fileContents.length() == 0) {
+		createResponse(conn, "404 Not found", "text/html", "<h1>File not found</h1>");
+	} else {
+		createResponse(conn, "200 OK", request.fileType, fileContents);
+	}
 }
 
 int WebServer::getPort()
@@ -357,24 +346,27 @@ int WebServer::getPort()
 	return port;
 }
 
-void WebServer::transferFile(Connection& conn, std::string fileName)
+std::string WebServer::getFile(std::string fileName)
 {
 	FILE* f = fopen(fileName.c_str(), "rb");
 
-	std::cout << "Transferring file " << fileName << "...";
+	if (!f) {
+		return "";
+	}
 
 	char buf[BUFFER_SIZE];
 	int totalCharactersRead = 0;
+	std::string result;
 
 	while (!feof(f)) {
 		int charactersRead = fread(buf, sizeof(char), BUFFER_SIZE, f);
-		conn.writebuf.append(buf, charactersRead);
+		result.append(buf, charactersRead);
 		totalCharactersRead += charactersRead;
 	}
 
 	fclose(f);
 
-	std::cout << " done [" << std::to_string(totalCharactersRead) << "]\n";
+	return result;
 }
 
 WebServer::~WebServer()

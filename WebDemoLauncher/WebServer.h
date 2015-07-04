@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string>
 #include <vector>
+#include "Request.h"
 
 struct BinaryData {
 	char *data;
@@ -27,22 +28,25 @@ private:
 	int port;
 	WSADATA wsaData;
 	SOCKET ListenSocket;
-
 	ConnectionList connections;
+	bool shutdownTriggered = false;
 
 	int initWinsock(void);
 	int bindPort(int);
 	bool ReadData(Connection & conn);
 	bool isEndOfRequest(std::string request);
-	void handleRequest(Connection&, std::string);
+	void createResponse(Connection &conn, std::string status, std::string contentType, std::string payload);
+	void handleRequest(Connection&, Request);
 	long getFileSize(std::string filename);
 	void transferFile(Connection& conn, std::string fileName);
 	bool WriteData(Connection& conn);
 	void SetupFDSets(fd_set& ReadFDs, fd_set& WriteFDs, fd_set& ExceptFDs);
+	std::string getFile(std::string fileName);
 
 public:
 	WebServer();
 	int getPort();
+
 	int handle();
 
 	~WebServer();

@@ -15,7 +15,10 @@
 
 #include <stdio.h>
 #include <tchar.h>
-
-
-
-// TODO: reference additional headers your program requires here
+#include <iostream>
+#include <fstream>
+#include <streambuf>
+#include <direct.h>
+#include <stdlib.h>
+#include <time.h>
+#include <algorithm>

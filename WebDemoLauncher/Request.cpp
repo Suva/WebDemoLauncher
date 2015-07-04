@@ -1,21 +1,16 @@
 #include "stdafx.h"
 #include "Request.h"
-#include <algorithm>
 
 
 Request::Request(std::string request)
 {
-	int firstSpace = request.find(" ") + 1;
-	int secondSpace = request.find(" ", firstSpace);
-	
-	fileName = request.substr(firstSpace + 1, secondSpace - firstSpace - 1);
+	extractFileName(request);
+	detectFileType();
+}
 
-	std::replace(fileName.begin(), fileName.end(), '/', '\\');
 
-	if (fileName.length() == 0) {
-		fileName = "index.html";
-	}
-
+void Request::detectFileType()
+{
 	fileType = "application/octet-stream";
 
 	int dotPosition = fileName.find(".");
@@ -23,8 +18,6 @@ Request::Request(std::string request)
 	if (dotPosition >= 0) {
 		std::string extension = fileName.substr(dotPosition + 1);
 		std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
-
-		printf("File extension is: %s\n", extension.c_str());
 
 		if (extension.compare("txt") == 0) {
 			fileType = "text/plain";
@@ -49,11 +42,22 @@ Request::Request(std::string request)
 		if (extension.compare("png") == 0 || extension.compare("png") == 0) {
 			fileType = "image/png";
 		}
-
-		printf("File type is %s\n", fileType.c_str());
-	} 
+	}
 }
 
+void Request::extractFileName(std::string request)
+{
+	int firstSpace = request.find(" ") + 1;
+	int secondSpace = request.find(" ", firstSpace);
+
+	fileName = request.substr(firstSpace + 1, secondSpace - firstSpace - 1);
+
+	std::replace(fileName.begin(), fileName.end(), '/', '\\');
+
+	if (fileName.length() == 0) {
+		fileName = "index.html";
+	}
+}
 
 Request::~Request()
 {

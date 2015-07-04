@@ -1,6 +1,6 @@
 # WebDemoLauncher
 
-Absolutely minimal HTTP server to provide simpler means to launch Web Browser demos locally.
+Absolutely minimal HTTP server to provide simpler means to launch Web Browser demos locally. Get the binaries from [RELEASES PAGE](https://github.com/Suva/WebDemoLauncher/releases).
 
 ## Usage
 

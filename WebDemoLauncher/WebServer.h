@@ -30,6 +30,7 @@ private:
 	SOCKET ListenSocket;
 	ConnectionList connections;
 	bool shutdownTriggered = false;
+	time_t heartbeat = 0;
 
 	int initWinsock(void);
 	int bindPort(int);
@@ -40,7 +41,7 @@ private:
 	bool WriteData(Connection& conn);
 	void SetupFDSets(fd_set& ReadFDs, fd_set& WriteFDs, fd_set& ExceptFDs);
 	std::string getFile(std::string fileName);
-
+	
 public:
 	WebServer();
 	int getPort();

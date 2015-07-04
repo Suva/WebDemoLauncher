@@ -206,15 +206,15 @@ int WebServer::handle() {
 	sockaddr_in sinRemote;
 	int nAddrSize = sizeof(sinRemote);
 	
-	timeval time;
-	time.tv_sec = 3;
-	time.tv_usec = 0;
+	timeval timeout;
+	timeout.tv_sec = 1;
+	timeout.tv_usec = 0;
 
 	while(1){
 		fd_set ReadFDs, WriteFDs, ExceptFDs;
 		SetupFDSets(ReadFDs, WriteFDs, ExceptFDs);
 
-		if (select(0, &ReadFDs, &WriteFDs, &ExceptFDs, &time) > 0) {
+		if (select(0, &ReadFDs, &WriteFDs, &ExceptFDs, &timeout) > 0) {
 			if (FD_ISSET(ListenSocket, &ReadFDs)) {
 				SOCKET sd = accept(ListenSocket,
 					(sockaddr*)&sinRemote, &nAddrSize);
@@ -297,8 +297,10 @@ int WebServer::handle() {
 				return 0;
 			}
 		
-		} else {
-			// Timeout handler
+		} 
+		if (heartbeat && (time(0) - heartbeat >= 3)) {
+			std::cout << "Heartbeat lost, closing program." << std::endl;
+			return 0;
 		}
 	}
 
@@ -330,6 +332,12 @@ void WebServer::handleRequest(Connection& conn, Request request)
 		shutdownTriggered = true;
 		createResponse(conn, "200 OK", "text/plain", "Shutdown initiated.");
 		return;
+	}
+
+	if (request.fileName == "heartbeat") {
+		if(!heartbeat)
+			std::cout << "Heartbeat detected, will shut down server when lost." << std::endl;
+		heartbeat = time(0);	
 	}
 
 	// Normal file handling

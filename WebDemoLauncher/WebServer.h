@@ -16,8 +16,9 @@ struct Connection {
 	SOCKET sd;
 	std::string readbuf;
 	std::string writebuf;
+	bool shutdownTriggered;
 
-	Connection(SOCKET sd_) : sd(sd_) { }
+	Connection(SOCKET sd_) : sd(sd_), shutdownTriggered(false) { }
 };
 
 typedef std::vector<Connection> ConnectionList;

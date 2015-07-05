@@ -162,6 +162,12 @@ bool WebServer::WriteData(Connection& conn)
 	if (nBytes == conn.writebuf.length()) {
 		// Everything got sent, so take a shortcut on clearing buffer.
 		conn.writebuf.clear();
+		if (conn.shutdownTriggered)
+		{
+			shutdownTriggered = true;
+			std::cout << "Shutdown triggered by remote, closing program." << std::endl;
+			return 0;
+		}
 	}
 	else {
 		// We sent part of the buffer's data.  Remove that data from
@@ -290,16 +296,15 @@ int WebServer::handle() {
 					++it;
 				}
 			}
-
-			if (shutdownTriggered)
-			{
-				std::cout << "Shutdown triggered by remote, closing program." << std::endl;
-				return 0;
-			}
 		
 		} 
 		if (heartbeat && (time(0) - heartbeat >= 3)) {
 			std::cout << "Heartbeat lost, closing program." << std::endl;
+			return 0;
+		}
+
+		if (shutdownTriggered)
+		{
 			return 0;
 		}
 	}
@@ -329,7 +334,7 @@ void WebServer::handleRequest(Connection& conn, Request request)
 {
 	// Special requests
 	if (request.fileName == "shutdown") {
-		shutdownTriggered = true;
+		conn.shutdownTriggered = true;
 		createResponse(conn, "200 OK", "text/plain", "Shutdown initiated.");
 		return;
 	}
@@ -338,6 +343,12 @@ void WebServer::handleRequest(Connection& conn, Request request)
 		if(!heartbeat)
 			std::cout << "Heartbeat detected, will shut down server when lost." << std::endl;
 		heartbeat = time(0);	
+	}
+
+	if (request.fileName == "wdl.js") {
+		char *script =
+			"window.onbeforeunload = function() { var r = new XMLHttpRequest(); r.open('GET', '/shutdown', false); r.send(); }";
+		createResponse(conn, "200 OK", "application/javascript", script);
 	}
 
 	// Normal file handling

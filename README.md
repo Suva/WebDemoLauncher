@@ -8,7 +8,7 @@ Copy executable file into the same folder where index.html is. When starting thi
 
 ## Shutting down
 
-You can close the program normally, but there are easier way for automatic shutdown. Just include a magic script /wdl.js: <script src="wdl.js"></script>, this will register ununload handler that will close the server when browser is closed. If you would rather manually use the methods, check out their descriptions below.
+You can close the program normally, but there are easier way for automatic shutdown. Just include a magic script /wdl.js: &lt;script src="wdl.js"&gt;&lt;/script&gt;, this will register ununload handler that will close the server when browser is closed. If you would rather manually use the methods, check out their descriptions below.
 
 ### Force shutdown from remote
 
